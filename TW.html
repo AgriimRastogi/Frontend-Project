@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>My Quiz Project</title>
+    <style>
+        /* --- VISUAL DESIGN --- */
+        body {
+            font-family: Arial, Helvetica, sans-serif;
+            background-color: #f0f0f0;
+            text-align: center;
+        }
+
+        #main-container {
+            width: 60%;
+            margin: 50px auto;
+            background-color: white;
+            padding: 20px;
+            border: 1px solid #ccc;
+            border-radius: 10px;
+            box-shadow: 0px 0px 10px #aaa; /* Adds that nice 3D pop */
+        }
+
+        /* The Magic Class: This is how we switch screens without reloading the page.
+           We just add or remove this class to show/hide divs. */
+        .hidden {
+            display: none;
+        }
+
+        /* --- BUTTON STYLING --- */
+        button {
+            padding: 10px 20px;
+            margin: 10px;
+            cursor: crosshair; /* The "Sniper" cursor feel */
+            background-color: #4CAF50;
+            color: red; 
+            border: 10px solid; 
+            border-color: black;
+            font-size: 32px; 
+        }
+
+        button:hover {
+            background-color: yellow; 
+        }
+
+        /* --- OPTION BOX STYLING --- */
+        .option-box {
+            border: 10px solid #ddd; 
+            padding: 10px;
+            margin: 10px 0;
+            text-align: left;
+            cursor: crosshair; 
+        }
+
+        .option-box:hover {
+            background-color: blueviolet; 
+        }
+
+        /* --- RESULTS STYLING --- */
+        .correct { color: green; font-weight: bold; }
+        .wrong { color: red; font-weight: bold; }
+        .not-answered { color: orange; font-weight: bold; font-style: italic; }
+    </style>
+</head>
+<body>
+
+    <div id="main-container">
+        
+        <div id="intro-screen">
+            <h1>Welcome to Online Test</h1>
+            <p>This is a simple quiz application.</p>
+            <p id="total-questions-info">Loading questions...</p>
+            <button onclick="startQuiz()" id="start-btn" disabled>Start Test</button>
+        </div>
+
+        <div id="quiz-screen" class="hidden">
+            <h3 id="question-number"></h3>
+            <h2 id="question-text">Loading...</h2>
+            
+            <div id="options-area">
+                </div>
+
+            <br>
+            <button id="prev-btn" onclick="prevQuestion()">Previous</button>
+            <button id="next-btn" onclick="nextQuestion()">Next</button>
+            <button id="submit-btn" onclick="submitQuiz()" class="hidden">Submit Test</button>
+        </div>
+
+        <div id="result-screen" class="hidden">
+            <h1>Result</h1>
+            <h2 id="score-text"></h2>
+            <div id="answer-key"></div>
+            <button onclick="location.reload()">Restart</button>
+        </div>
+
+    </div>
+
+    <script>
+        // --- DATA STORAGE ---
+        let allQuestions = [];       // The Master Database (loaded from file)
+        let currentQuestions = [];   // The specific shuffled set for THIS user
+        let userAnswers = [];        // Where we store what the user clicked
+        let currentIndex = 0;        // Which question number are we on? (0 = 1st question)
+        const QUESTIONS_TO_SHOW = 15; // Limit the test to 15 questions
+
+        // --- SECURITY GUARD ---
+        // This function ensures that if your text contains symbols like "<" or ">",
+        // the browser treats them as text, not HTML code. Prevents bugs and hacking.
+        function escapeHtml(str) {
+            if (str === null || str === undefined) return '';
+            return String(str)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
+
+        // --- THE DELIVERY TRUCK (Fetching Data) ---
+        // 'async' means this function operates outside the normal flow, waiting for data.
+        async function loadQuestions() {
+            try {
+                // "Go get the file..."
+                let response = await fetch('questions.json');
+                
+                // "...Check if the delivery arrived okay..."
+                if (!response.ok) {
+                    throw new Error("HTTP error " + response.status);
+                }
+                
+                // "...Unpack the JSON box."
+                allQuestions = await response.json();
+                console.log("Questions loaded:", allQuestions.length);
+                
+                // Update the UI to say "Ready!"
+                document.getElementById('total-questions-info').innerText = "Total Questions Available: " + allQuestions.length;
+                document.getElementById('start-btn').disabled = false; // Unlock the start button
+                
+            } catch (error) {
+                document.getElementById('total-questions-info').innerText = "Error loading questions. Make sure local server is running.";
+                console.error(error);
+            }
+        }
+
+        // Run the delivery immediately
+        loadQuestions();
+
+        // --- STARTING THE ENGINE ---
+        function startQuiz() {
+            if (allQuestions.length === 0) {
+                alert("No questions available!");
+                return;
+            }
+
+            // COOL LOGIC 1: THE COPY & SHUFFLE
+            // [...allQuestions] makes a fresh photocopy so we don't mess up the original.
+            // .sort(...) randomly jumbles the order.
+            let shuffled = [...allQuestions].sort(() => 0.5 - Math.random());
+            
+            // Slice takes only the top 15 (or fewer) from the shuffled deck
+            let count = Math.min(shuffled.length, QUESTIONS_TO_SHOW);
+            currentQuestions = shuffled.slice(0, count);
+
+            // Create an empty answer sheet with 'null' in every slot
+            userAnswers = new Array(count).fill(null);
+
+            // --- SCENE CHANGE ---
+            // Hide Intro, Show Quiz
+            document.getElementById('intro-screen').classList.add('hidden');
+            document.getElementById('quiz-screen').classList.remove('hidden');
+
+            showQuestion(0); // Load the first question
+        }
+
+        // --- THE PAGE TURNER ---
+        function showQuestion(index) {
+            currentIndex = index;
+            let q = currentQuestions[index];
+
+            // Update the Question Text
+            document.getElementById('question-number').innerText = "Question " + (index + 1) + "/" + currentQuestions.length;
+            document.getElementById('question-text').innerText = q.ques;
+
+            // Gather the 4 options into a clean list
+            let optionsArr = [q.option1, q.option2, q.option3, q.option4];
+
+            // --- DYNAMIC HTML GENERATION ---
+            let optionsHtml = '';
+            for (let i = 0; i < optionsArr.length; i++) {
+                // Sanitize the text so special characters don't break the HTML
+                let displayValue = escapeHtml(optionsArr[i] ?? '');
+                
+                // MEMORY RECALL: Did the user already answer this?
+                let checked = "";
+                if (userAnswers[index] === optionsArr[i]) {
+                    checked = "checked"; // If yes, re-select the radio button
+                }
+                
+                // Building the HTML string for the radio button
+                optionsHtml += `
+                    <div class="option-box">
+                        <label style="display:block; width:100%; cursor:crosshair;">
+                            <input type="radio" name="opt" value="${i}" onchange="saveAnswer(${i})" ${checked}>
+                            ${displayValue}
+                        </label>
+                    </div>
+                `;
+            }
+            // Inject the HTML into the page
+            document.getElementById('options-area').innerHTML = optionsHtml;
+
+            // --- BUTTON LOGIC ---
+            // Disable 'Previous' if we are on the first page
+            document.getElementById('prev-btn').disabled = (index === 0);
+
+            // If we are on the last page, Swap "Next" for "Submit"
+            if (index === currentQuestions.length - 1) {
+                document.getElementById('next-btn').classList.add('hidden');
+                document.getElementById('submit-btn').classList.remove('hidden');
+            } else {
+                document.getElementById('next-btn').classList.remove('hidden');
+                document.getElementById('submit-btn').classList.add('hidden');
+            }
+        }
+
+        // --- RECORDING THE ANSWER ---
+        function saveAnswer(optIndex) {
+            // Retrieve the actual text of the chosen option
+            let chosen = currentQuestions[currentIndex][`option${optIndex+1}`];
+            // Write it into our answer sheet
+            userAnswers[currentIndex] = chosen;
+        }
+
+        // --- NAVIGATION ---
+        function nextQuestion() {
+            if (currentIndex < currentQuestions.length - 1) {
+                showQuestion(currentIndex + 1);
+            }
+        }
+
+        function prevQuestion() {
+            if (currentIndex > 0) {
+                showQuestion(currentIndex - 1);
+            }
+        }
+
+        // --- THE GRADING MACHINE ---
+        function submitQuiz() {
+            let score = 0;
+            let resultHtml = "";
+
+            // Loop through every single question on the desk
+            for (let i = 0; i < currentQuestions.length; i++) {
+                let correct = currentQuestions[i].correct_ans;
+                let given = userAnswers[i];
+                let status = "";
+                let givenDisplay = "";
+
+                // Compare User's Answer vs Correct Answer
+                if (given === correct) {
+                    score++; // +1 Point
+                    status = "<span class='correct'>Correct</span>";
+                } else if (given === null) {
+                    status = "<span class='not-answered'>Skipped</span>";
+                } else {
+                    status = "<span class='wrong'>Wrong</span>";
+                }
+
+                // Handle display text for skipped questions
+                if (given === null) {
+                    givenDisplay = "<span class='not-answered'>Not Answered</span>";
+                } else {
+                    givenDisplay = escapeHtml(given);
+                }
+
+                // Append this question's report to the result list
+                resultHtml += `<p><strong>Q${i+1}:</strong> ${escapeHtml(currentQuestions[i].ques)} <br> 
+                               Your Answer: ${givenDisplay} | Correct: ${escapeHtml(correct)} <br>
+                               ${status}</p><hr>`;
+            }
+
+            // --- SCENE CHANGE ---
+            // Hide Quiz, Show Results
+            document.getElementById('quiz-screen').classList.add('hidden');
+            document.getElementById('result-screen').classList.remove('hidden');
+
+            // Print the final score
+            document.getElementById('score-text').innerText = "You scored " + score + " out of " + currentQuestions.length;
+            document.getElementById('answer-key').innerHTML = resultHtml;
+        }
+
+    </script>
+
+</body>
+</html>
